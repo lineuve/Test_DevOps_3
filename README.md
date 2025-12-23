@@ -230,3 +230,137 @@ Durante a construção, superamos três obstáculos principais que moldaram a ve
 1. **Dependência de Sudo:** Removemos comandos `sudo` do Jenkinsfile e movemos para o Dockerfile para evitar erros de permissão.
 2. **Caminhos de Binários:** Ajustamos a execução dos testes para confiar no `make` em vez de chamar binários manualmente (`./bin/unittest`), evitando o erro "File not found (127)".
 3. **Ambiente Python:** O uso de `venv` dentro do pipeline garantiu que pudéssemos usar ferramentas Python modernas sem conflitar com o sistema operacional do container.
+
+
+# 🏛️ Arquitetura de Referência: Pipeline de CI/CD para C++ Moderno
+
+**Projeto:** Calculator Core V3
+**Versão da Arquitetura:** 1.0.0
+**Status:** Produção
+
+## 1. Resumo Executivo
+
+Esta arquitetura define um pipeline de Integração Contínua (CI) automatizado, projetado para garantir a qualidade, segurança e rastreabilidade de aplicações desenvolvidas em **C++17**.
+
+A solução adota uma abordagem **Híbrida e Containerizada**:
+
+* **Core:** C++ (Performance e Lógica).
+* **Infraestrutura:** Docker (Imutabilidade e Isolamento).
+* **Ferramentas Auxiliares:** Python (Relatórios e Orquestração de Cobertura).
+
+---
+
+## 2. Diagrama de Alto Nível
+
+O fluxo de dados segue o padrão *Commit-to-Artifact*, onde cada submissão de código dispara uma cadeia de validações isolada em containers.
+
+**Fluxo de Dados:**
+
+1. **Source:** Desenvolvedor envia código para o GitHub.
+2. **Trigger:** Webhook/Cron aciona o Jenkins Controller.
+3. **Provision:** Jenkins aloca um nó `cpp-agent` (Container Docker).
+4. **Execution:** O Agente executa linting, build, testes e gera métricas.
+5. **Artifacts:** Relatórios HTML e Binários são armazenados no Jenkins.
+
+---
+
+## 3. Stack Tecnológico (BOM - Bill of Materials)
+
+| Domínio | Tecnologia | Versão/Detalhe | Justificativa |
+| --- | --- | --- | --- |
+| **Linguagem** | C++ | Standard 17 (C++17) | Requisito do projeto para funcionalidades modernas. |
+| **SCM** | GitHub | Git | Versionamento distribuído e gestão de branches. |
+| **Orquestrador** | Jenkins | 2.x (LTS) | Flexibilidade com Pipelines Declarativas e suporte a Docker. |
+| **Build System** | GNU Make | 4.x | Padrão de indústria para C++, fácil manutenção via Makefile. |
+| **Testes** | GoogleTest | GTest/GMock | Framework robusto para testes unitários e mocking em C++. |
+| **Qualidade** | Clang-Tidy | LLVM Project | Análise estática para garantir conformidade (CppCoreGuidelines). |
+| **Cobertura** | Gcovr | Python-based | Gera relatórios HTML/XML mais ricos que o lcov padrão. |
+| **Infraestrutura** | Docker | Ubuntu 24.04 Base | Garante ambiente efêmero, limpo e reproduzível. |
+
+---
+
+## 4. Estratégia de Pipeline (Pipeline Design)
+
+A pipeline foi desenhada com o princípio de **"Fail Fast"** (Falhar Rápido). As etapas mais leves e críticas rodam primeiro.
+
+### Estágios do Pipeline
+
+1. **Checkout & SCM:**
+* Recuperação do código-fonte.
+* Limpeza do Workspace (`cleanWs()`) para evitar contaminação de builds anteriores.
+
+
+2. **Toolchain Setup (Python Venv):**
+* **Problema Resolvido:** Conflitos de pacotes Python no sistema operacional do container.
+* **Solução:** Criação de um `Virtual Environment (venv)` dinâmico para instalar o `gcovr`.
+* *Comando:* `python3 -m venv venv && pip install gcovr`
+
+
+3. **Static Analysis (Quality Gate 1):**
+* Executa `clang-tidy` e `clang-format`.
+* **Política:** Warnings são tratados como erros (`-warnings-as-errors`). O build falha se o código estiver "sujo" ou mal formatado.
+
+
+4. **Build & Test (Quality Gate 2):**
+* **Instrumentação:** Compilação com flags `-fprofile-arcs -ftest-coverage` para permitir a leitura de cobertura.
+* **Execução:** O `make unittest` compila e executa o binário de teste imediatamente.
+* **Tratamento de Erros:** O código C++ foi blindado contra `Floating Point Exceptions` (divisão por zero), garantindo que testes de falha sejam controlados (expectativa de exceção).
+
+
+5. **Coverage Reports:**
+* O utilitário `gcovr` varre os diretórios em busca de arquivos `.gcda` gerados no estágio anterior.
+* Gera: `coverage.xml` (para leitura de máquina/plugins) e `coverage.html` (para leitura humana).
+
+
+
+---
+
+## 5. Design de Infraestrutura (Agentes)
+
+A infraestrutura segue o modelo de **Agentes Especializados**. O Jenkins Controller não executa builds; ele delega para o nó `cpp-agent`.
+
+### O Agente (`cpp-agent`)
+
+Uma imagem Docker customizada baseada em Ubuntu 24.04.
+
+**Camadas da Imagem:**
+
+1. **Base:** Ubuntu 24.04 (Minimal).
+2. **Compiladores:** `build-essential`, `cmake`, `g++`.
+3. **Qualidade:** `clang-tidy`, `clang-format`.
+4. **Runtime Python:** `python3`, `python3-pip`, `python3-venv` (Essencial para a ferramenta de cobertura).
+5. **Conectividade:** `openssh-server` e usuário `jenkins` configurado para comunicação segura com o Controller.
+
+> **Nota de Segurança:** O usuário `jenkins` dentro do container **não possui acesso root/sudo**. Todas as ferramentas necessárias são pré-instaladas na construção da imagem (Dockerfile), eliminando a necessidade de elevar privilégios durante a pipeline.
+
+---
+
+## 6. Métricas e KPIs de Sucesso
+
+Para considerar uma execução bem-sucedida, a pipeline valida os seguintes KPIs:
+
+* **Compilação:** 0 Erros.
+* **Linting:** 0 Warnings (Strict mode).
+* **Testes Unitários:** 100% de Pass rate (Todos os cenários, incluindo casos de borda como divisão por zero).
+* **Artefatos:** Geração bem-sucedida do relatório `coverage.html`.
+
+---
+
+## 7. Guia de Manutenção (Troubleshooting)
+
+### Cenário: Erro 127 (Command not found)
+
+* **Sintoma:** Pipeline falha ao tentar rodar `./bin/unittest`.
+* **Causa:** O binário foi gerado em um subdiretório (`tests/bin`) ou já foi limpo.
+* **Resolução:** A pipeline foi ajustada para confiar no comando `make unittest`, que gerencia os caminhos internamente. Não execute binários manualmente fora do contexto do Makefile.
+
+### Cenário: Erro de Permissão (sudo)
+
+* **Sintoma:** `sudo: command not found` no log do Jenkins.
+* **Causa:** Tentativa de instalar pacotes durante o runtime do job.
+* **Resolução:** Adicione o pacote necessário no `Dockerfile` do agente e reconstrua a imagem. **Não** use sudo no Jenkinsfile.
+
+---
+
+**Aprovado por:** DevOps Phillips Team
+**Data:** Dezembro/2025
