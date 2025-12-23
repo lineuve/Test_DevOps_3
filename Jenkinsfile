@@ -16,8 +16,9 @@ pipeline {
         stage('2. Setup Tools') {
             steps {
                 script {
+                    echo ">>> Configurando ambiente Python (Ferramentas ja instaladas no Docker)..."
                     sh '''
-                        sudo apt-get update -qq && sudo apt-get install -y python3-venv || true
+                        # Apenas cria o venv e instala o gcovr
                         python3 -m venv venv
                         . venv/bin/activate
                         pip install gcovr
