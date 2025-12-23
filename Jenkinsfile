@@ -1,30 +1,21 @@
 pipeline {
-    agent {
-        label 'cpp-agent'
-    }
-
+    agent { label 'cpp-agent' }
     environment {
         CXXFLAGS = "-Wall -Wextra -std=c++17 -fprofile-arcs -ftest-coverage"
         LDFLAGS  = "-lgcov --coverage"
     }
-
-    triggers {
-        cron('H H * * *')
-    }
-
+    triggers { cron('H H * * *') }
     stages {
-        stage('1. Checkout & Clean') {
+        stage('1. Checkout') {
             steps {
                 cleanWs()
                 checkout scm
                 sh 'mkdir -p reports'
             }
         }
-
-        stage('2. Setup Tools (Python/Gcovr)') {
+        stage('2. Setup Tools') {
             steps {
                 script {
-                    echo ">>> Instalando gcovr..."
                     sh '''
                         sudo apt-get update -qq && sudo apt-get install -y python3-venv || true
                         python3 -m venv venv
@@ -34,36 +25,20 @@ pipeline {
                 }
             }
         }
-
-        stage('3. Static Analysis') {
+        stage('3. Check & Build') {
             steps {
                 dir('calculator') {
-                    sh 'make check || true' 
-                }
-            }
-        }
-
-        stage('4. Build (Instrumented)') {
-            steps {
-                dir('calculator') {
+                    sh 'make check || true'
                     sh 'make clean'
                     sh 'make all CXXFLAGS="${CXXFLAGS}" LDFLAGS="${LDFLAGS}"'
                     sh 'make unittest CXXFLAGS="${CXXFLAGS}" LDFLAGS="${LDFLAGS}"'
                 }
             }
         }
-
-        stage('5. Unit Tests Execution') {
+        stage('4. Test & Report') {
             steps {
                 dir('calculator') {
                     sh './bin/unittest'
-                }
-            }
-        }
-
-        stage('6. Generate Coverage Report') {
-            steps {
-                dir('calculator') {
                     sh '''
                         . ../venv/bin/activate
                         gcovr -r . --xml-pretty > ../reports/coverage.xml
@@ -73,13 +48,7 @@ pipeline {
             }
         }
     }
-
     post {
-        always {
-            archiveArtifacts artifacts: 'reports/*.html', allowEmptyArchive: true
-        }
-        success {
-            echo "✅ Pipeline Finalizado!"
-        }
+        always { archiveArtifacts artifacts: 'reports/*.html', allowEmptyArchive: true }
     }
 }
