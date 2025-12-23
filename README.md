@@ -159,3 +159,74 @@ Após cada build com sucesso (Verde 🟢), acesse a aba **"Artifacts"** no Jenki
 ---
 
 *Documentação gerada automaticamente pela equipe DevOps Phillips.*
+Aqui está uma descrição detalhada e técnica sobre o **Processo de Construção da Pipeline**, ideal para compor a documentação técnica ou para apresentar em uma review de arquitetura.
+
+Esta seção explica a evolução da solução, desde a infraestrutura básica até a automação completa com relatórios de qualidade.
+
+---
+
+# 🚀 O Processo de Construção da Pipeline (End-to-End)
+
+A construção desta pipeline de CI/CD para o projeto **Calculator Core (C++)** seguiu uma abordagem incremental e baseada em camadas, garantindo que a infraestrutura, o código e a automação estivessem desacoplados e robustos.
+
+Abaixo, detalhamos as 4 fases principais desse processo.
+
+## Fase 1: Infraestrutura Imutável (Agents)
+
+Antes de escrever qualquer script de automação, precisávamos de um ambiente de execução consistente. O servidor Jenkins (Master) não deve compilar código; essa responsabilidade é dos **Agentes**.
+
+* **Desafio:** O projeto exige ferramentas específicas de C++ (`clang-tidy`, `gtest`, `cmake`) e Python (`gcovr`) que não existem nativamente na maioria dos servidores.
+* **Solução:** Criação de uma imagem Docker personalizada (`cpp-agent`).
+* **Decisão Técnica:** Em vez de usar `sudo apt-get install` dentro do Pipeline (o que é lento e inseguro), "assamos" todas as dependências na imagem Docker.
+* *Benefício:* O tempo de build cai drasticamente e o ambiente se torna reprodutível.
+
+
+
+## Fase 2: Saneamento do Código e Build System
+
+Ao analisarmos o repositório inicial, identificamos que a automação falharia devido a erros no código-fonte e no `Makefile`.
+
+* **Correção do Makefile:** O target `unittest` compilava mas não executava o binário. Alteramos para garantir a execução imediata.
+* **Quality Gate (Linter):** O código tinha variáveis não inicializadas. Configuramos o `clang-tidy` para barrar o build (`-warnings-as-errors`) se o código não estiver limpo.
+* **Correção de Bug Crítico:** O código crashava com `Floating Point Exception` (divisão por zero). Implementamos tratamento de exceção (`std::invalid_argument`) no C++ e atualizamos o teste unitário para esperar esse comportamento.
+
+## Fase 3: A Lógica da Pipeline (Jenkinsfile)
+
+Adotamos o modelo **Declarative Pipeline** pela legibilidade e facilidade de manutenção. A pipeline foi estruturada em estágios lógicos:
+
+1. **Checkout:** Baixa o código do GitHub.
+2. **Setup Tools:** Cria um ambiente virtual Python (`venv`) isolado para instalar o `gcovr`. Isso evita poluir o sistema do agente.
+3. **Static Analysis:** Roda o `make check` para garantir estilo e boas práticas antes de gastar recursos compilando.
+4. **Build & Test:** Compila o código injetando flags de cobertura (`-fprofile-arcs -ftest-coverage`) e executa os testes.
+5. **Coverage Report:** Processa os dados brutos gerados pelos testes e cria relatórios HTML/XML.
+
+## Fase 4: Observabilidade e Métricas (Coverage)
+
+Uma pipeline que apenas diz "Passou/Falhou" é insuficiente. Precisávamos saber **quanto** do código foi testado.
+
+* **Ferramenta:** Escolhemos o `gcovr` (Python) por sua capacidade de gerar relatórios HTML amigáveis para projetos C++.
+* **Integração:** Configuramos o Jenkins para arquivar (`archiveArtifacts`) os HTMLs gerados, permitindo que o desenvolvedor veja, linha por linha, o que foi testado diretamente na interface do Jenkins.
+
+---
+
+## Resumo das Tecnologias Envolvidas
+
+| Camada | Tecnologia | Função |
+| --- | --- | --- |
+| **Orquestração** | **Jenkins** | Gerenciamento do fluxo de trabalho e gatilhos (Cron/Git). |
+| **Agente** | **Docker** | Isolamento do ambiente de build (Ubuntu 24.04). |
+| **Linguagem** | **C++17** | Core da aplicação. |
+| **Build** | **Makefile** | Automação local de compilação. |
+| **Testes** | **GoogleTest** | Framework de testes unitários. |
+| **Qualidade** | **Clang-Tidy** | Análise estática e Linter. |
+| **Cobertura** | **Gcovr (Python)** | Geração de relatórios visuais de cobertura. |
+
+---
+
+### Lições Aprendidas (Troubleshooting) durante o Processo
+
+Durante a construção, superamos três obstáculos principais que moldaram a versão final:
+
+1. **Dependência de Sudo:** Removemos comandos `sudo` do Jenkinsfile e movemos para o Dockerfile para evitar erros de permissão.
+2. **Caminhos de Binários:** Ajustamos a execução dos testes para confiar no `make` em vez de chamar binários manualmente (`./bin/unittest`), evitando o erro "File not found (127)".
+3. **Ambiente Python:** O uso de `venv` dentro do pipeline garantiu que pudéssemos usar ferramentas Python modernas sem conflitar com o sistema operacional do container.
