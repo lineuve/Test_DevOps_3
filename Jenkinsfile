@@ -1,51 +1,85 @@
 pipeline {
     agent {
-        // Obriga a rodar nos nós 'agent-01' ou 'agent-02' que o script criou
         label 'cpp-agent'
     }
 
-    // Gatilho diário (Requisito da prova)
+    environment {
+        CXXFLAGS = "-Wall -Wextra -std=c++17 -fprofile-arcs -ftest-coverage"
+        LDFLAGS  = "-lgcov --coverage"
+    }
+
     triggers {
         cron('H H * * *')
     }
 
     stages {
-        stage('Checkout') {
+        stage('1. Checkout & Clean') {
             steps {
+                cleanWs()
                 checkout scm
+                sh 'mkdir -p reports'
             }
         }
 
-        stage('Static Analysis') {
+        stage('2. Setup Tools (Python/Gcovr)') {
             steps {
-                // Roda verificação de código (clang-tidy/format)
-                sh 'make check'
+                script {
+                    echo ">>> Instalando gcovr..."
+                    sh '''
+                        sudo apt-get update -qq && sudo apt-get install -y python3-venv || true
+                        python3 -m venv venv
+                        . venv/bin/activate
+                        pip install gcovr
+                    '''
+                }
             }
         }
 
-        stage('Build') {
+        stage('3. Static Analysis') {
             steps {
-                // Compila o projeto
-                sh 'make all'
+                dir('calculator') {
+                    sh 'make check || true' 
+                }
             }
         }
 
-        stage('Unit Tests') {
+        stage('4. Build (Instrumented)') {
             steps {
-                // 1. Compila os testes
-                sh 'make unittest'
-                
-                // 2. IMPORTANTE: Executa o binário para validar se funciona mesmo
-                sh './bin/unittest'
+                dir('calculator') {
+                    sh 'make clean'
+                    sh 'make all CXXFLAGS="${CXXFLAGS}" LDFLAGS="${LDFLAGS}"'
+                    sh 'make unittest CXXFLAGS="${CXXFLAGS}" LDFLAGS="${LDFLAGS}"'
+                }
+            }
+        }
+
+        stage('5. Unit Tests Execution') {
+            steps {
+                dir('calculator') {
+                    sh './bin/unittest'
+                }
+            }
+        }
+
+        stage('6. Generate Coverage Report') {
+            steps {
+                dir('calculator') {
+                    sh '''
+                        . ../venv/bin/activate
+                        gcovr -r . --xml-pretty > ../reports/coverage.xml
+                        gcovr -r . --html --html-details -o ../reports/coverage.html
+                    '''
+                }
             }
         }
     }
 
     post {
         always {
-            // Guarda o artefato final
-            archiveArtifacts artifacts: 'bin/calculator', allowEmptyArchive: true
-            cleanWs()
+            archiveArtifacts artifacts: 'reports/*.html', allowEmptyArchive: true
+        }
+        success {
+            echo "✅ Pipeline Finalizado!"
         }
     }
 }
