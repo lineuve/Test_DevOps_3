@@ -3,7 +3,7 @@ Esta é a entrega final. Abaixo está a **Documentação Oficial (README.md)** e
 
 Ela cobre desde a arquitetura da infraestrutura até o guia de uso para desenvolvedores, consolidando todo o trabalho que fizemos para corrigir o código, os agentes e o pipeline.
 
----
+
 
 # 📘 Documentação Oficial: Pipeline de CI/CD (C++ Calculator)
 
@@ -11,7 +11,7 @@ Ela cobre desde a arquitetura da infraestrutura até o guia de uso para desenvol
 **Squad:** DevOps Phillips & Engineering Team
 **Stack:** C++17, Jenkins, Docker, Python (Gcovr), GoogleTest
 
----
+
 
 ## 1. Visão Geral da Arquitetura
 
@@ -26,7 +26,7 @@ Este projeto implementa uma pipeline de integração contínua robusta para uma 
 5. **Relatórios:** O `gcovr` processa os binários e gera HTML/XML.
 6. **Feedback:** O status (Sucesso/Falha) e os artefatos são publicados.
 
----
+
 
 ## 2. Infraestrutura (Para Time DevOps)
 
